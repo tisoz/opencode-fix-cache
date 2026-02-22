@@ -62,6 +62,13 @@ export namespace LLM {
       Provider.getProvider(input.model.providerID),
       Auth.get(input.model.providerID),
     ])
+    if (provider.options?.enableMeta) {
+      input.model.options.metadata = {
+        user_session_id: `user_${Instance.project.id ?? "unknown"}_account__session_${input.sessionID}`,
+        project_id: Instance.project.id,
+        session_id: input.sessionID,
+      }
+    }
     const isCodex = provider.id === "openai" && auth?.type === "oauth"
 
     const system = []

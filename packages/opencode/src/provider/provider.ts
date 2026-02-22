@@ -1085,6 +1085,20 @@ export namespace Provider {
           opts.signal = combined
         }
 
+        // Inject metadata from provider.options if enableMeta is set
+        if (provider.options?.enableMeta && opts.body && opts.method === "POST") {
+          try {
+            options.headers["x-opencode-session"] = model.options.metadata.user_session_id
+
+            const body = JSON.parse(opts.body as string)
+            body.metadata ||= {}
+            body.metadata.user_id = model.options.metadata.user_session_id
+            body.metadata.project_id = model.options.metadata.project_id
+            body.metadata.session_id = model.options.metadata.session_id
+            opts.body = JSON.stringify(body)
+          } catch {}
+        }
+
         // Strip openai itemId metadata following what codex does
         // Codex uses #[serde(skip_serializing)] on id fields for all item types:
         // Message, Reasoning, FunctionCall, LocalShellCall, CustomToolCall, WebSearchCall
