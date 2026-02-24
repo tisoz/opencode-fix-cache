@@ -68,6 +68,28 @@ jobs:
       - name: Display structure
         run: ls -R artifacts
 
+      - name: Package artifacts
+        run: |
+          mkdir -p release
+          cd artifacts
+          for dir in */; do
+            platform="${dir%/}"
+            if [ -d "$dir" ]; then
+              cd "$dir"
+              for subdir in */; do
+                if [ -d "$subdir" ]; then
+                  cd "$subdir"
+                  if [ -f "bin/opencode.exe" ]; then
+                    zip -j "../../../release/opencode-windows-x64.zip" bin/opencode.exe
+                  elif [ -f "bin/opencode" ]; then
+                    tar -czf "../../../release/opencode-${platform}.tar.gz" -C bin opencode
+                  fi
+                  cd ..
+                fi
+              done
+              cd ..
+            fi
+          done
       - name: Generate version
         id: version
         run: echo "version=dev-$(date +'%Y%m%d%H%M%S')-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
@@ -80,6 +102,6 @@ jobs:
           draft: false
           prerelease: true
           generate_release_notes: true
-          files: artifacts/**/*
+          files: release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
