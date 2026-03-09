@@ -1121,6 +1121,15 @@ export namespace Provider {
           } catch {}
         }
 
+        // Set service_tier to priority if enableFast is set
+        if (provider.options?.enableFast && opts.body && opts.method === "POST") {
+          try {
+            const body = JSON.parse(opts.body as string)
+            body.service_tier = "priority"
+            opts.body = JSON.stringify(body)
+          } catch {}
+        }
+
         // Strip openai itemId metadata following what codex does
         // Codex uses #[serde(skip_serializing)] on id fields for all item types:
         // Message, Reasoning, FunctionCall, LocalShellCall, CustomToolCall, WebSearchCall

@@ -2,10 +2,22 @@
 
 > 此项目用于启用第三方CC的aws缓存渠道
 
-* 启用方式
-`opencode.json` `生效参数enableMeta:true`
+### 配置参数
+
+在 `opencode.json` 的 provider `options` 中配置以下参数：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `enableMeta` | `boolean` | 启用后会在请求 header 中注入 `x-opencode-session`，并在请求 body 的 `metadata` 字段中注入 `user_id`、`project_id`、`session_id` |
+| `enableFast` | `boolean` | 启用后会在请求 body 中设置 `service_tier: "priority"`，用于开启优先级加速（适用于 OpenAI 和 Claude） |
+| `setCacheKey` | `boolean` | 启用缓存 key |
+| `baseURL` | `string` | 自定义 API 地址 |
+| `apiKey` | `string` | API 密钥 |
+
+### 配置示例
+
 ```json
-      {
+{
   "anthropic": {
     "name": "fox.anthropic.claude",
     "npm": "@ai-sdk/anthropic",
@@ -13,7 +25,8 @@
       "baseURL": "https://code.newcli.com/claude/aws/v1",
       "apiKey": "sk-ant-oat01-x-x-x",
       "setCacheKey": true,
-      "enableMeta": true
+      "enableMeta": true,
+      "enableFast": true
     },
     "models": {
       "claude-sonnet-4-5": {
@@ -143,5 +156,3 @@
   }
 }
 ```
-
-
