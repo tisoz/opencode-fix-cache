@@ -65,7 +65,6 @@ export namespace LLM {
       Auth.get(input.model.providerID),
     ])
     // TODO: move this to a proper hook
-    const isOpenaiOauth = provider.id === "openai" && auth?.type === "oauth"
     if (provider.options?.enableMeta) {
       input.model.options.metadata = {
         user_session_id: `user_${Instance.project.id ?? "unknown"}_account__session_${input.sessionID}`,
