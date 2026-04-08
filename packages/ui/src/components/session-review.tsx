@@ -15,7 +15,7 @@ import { getDirectory, getFilename } from "@opencode-ai/util/path"
 import { checksum } from "@opencode-ai/util/encode"
 import { createEffect, createMemo, For, Match, onCleanup, Show, Switch, untrack, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
-import { type FileContent, type FileDiff } from "@opencode-ai/sdk/v2"
+import { type FileContent, type SnapshotFileDiff, type VcsFileDiff } from "@opencode-ai/sdk/v2"
 import { PreloadMultiFileDiffResult } from "@pierre/diffs/ssr"
 import { type SelectedLineRange } from "@pierre/diffs"
 import { Dynamic } from "solid-js/web"
@@ -23,6 +23,7 @@ import { mediaKindFromPath } from "../pierre/media"
 import { cloneSelectedLineRange, previewSelectedLines } from "../pierre/selection-bridge"
 import { createLineCommentController } from "./line-comment-annotations"
 import type { LineCommentEditorProps } from "./line-comment"
+import { normalize, text, type ViewDiff } from "./session-diff"
 
 const MAX_DIFF_CHANGED_LINES = 500
 const REVIEW_MOUNT_MARGIN = 300
@@ -61,7 +62,8 @@ export type SessionReviewCommentActions = {
 
 export type SessionReviewFocus = { file: string; id: string }
 
-type ReviewDiff = FileDiff & { preloaded?: PreloadMultiFileDiffResult<any> }
+type ReviewDiff = (SnapshotFileDiff | VcsFileDiff) & { preloaded?: PreloadMultiFileDiffResult<any> }
+type Item = ViewDiff & { preloaded?: PreloadMultiFileDiffResult<any> }
 
 export interface SessionReviewProps {
   title?: JSX.Element
@@ -155,8 +157,8 @@ export const SessionReview = (props: SessionReviewProps) => {
   const opened = () => store.opened
 
   const open = () => props.open ?? store.open
-  const files = createMemo(() => props.diffs.map((diff) => diff.file))
-  const diffs = createMemo(() => new Map(props.diffs.map((diff) => [diff.file, diff] as const)))
+  const items = createMemo<Item[]>(() => props.diffs.map((diff) => ({ ...normalize(diff), preloaded: diff.preloaded })))
+  const files = createMemo(() => items().map((diff) => diff.file))
   const grouped = createMemo(() => {
     const next = new Map<string, SessionReviewComment[]>()
     for (const comment of props.comments ?? []) {
@@ -246,10 +248,10 @@ export const SessionReview = (props: SessionReviewProps) => {
 
   const selectionSide = (range: SelectedLineRange) => range.endSide ?? range.side ?? "additions"
 
-  const selectionPreview = (diff: FileDiff, range: SelectedLineRange) => {
+  const selectionPreview = (diff: ViewDiff, range: SelectedLineRange) => {
     const side = selectionSide(range)
-    const contents = side === "deletions" ? diff.before : diff.after
-    if (typeof contents !== "string" || contents.length === 0) return undefined
+    const contents = text(diff, side)
+    if (contents.length === 0) return undefined
 
     return previewSelectedLines(contents, range)
   }
@@ -359,11 +361,10 @@ export const SessionReview = (props: SessionReviewProps) => {
           <Show when={hasDiffs()} fallback={props.empty}>
             <div class="pb-6">
               <Accordion multiple value={open()} onChange={handleChange}>
-                <For each={files()}>
-                  {(file) => {
+                <For each={items()}>
+                  {(diff) => {
                     let wrapper: HTMLDivElement | undefined
-
-                    const item = createMemo(() => diffs().get(file)!)
+                    const file = diff.file
 
                     const expanded = createMemo(() => open().includes(file))
                     const mounted = createMemo(() => expanded() && (!!store.visible[file] || pinned(file)))
@@ -372,9 +373,9 @@ export const SessionReview = (props: SessionReviewProps) => {
                     const comments = createMemo(() => grouped().get(file) ?? [])
                     const commentedLines = createMemo(() => comments().map((c) => c.selection))
 
-                    const beforeText = () => (typeof item().before === "string" ? item().before : "")
-                    const afterText = () => (typeof item().after === "string" ? item().after : "")
-                    const changedLines = () => item().additions + item().deletions
+                    const beforeText = () => text(diff, "deletions")
+                    const afterText = () => text(diff, "additions")
+                    const changedLines = () => diff.additions + diff.deletions
                     const mediaKind = createMemo(() => mediaKindFromPath(file))
 
                     const tooLarge = createMemo(() => {
@@ -385,9 +386,9 @@ export const SessionReview = (props: SessionReviewProps) => {
                     })
 
                     const isAdded = () =>
-                      item().status === "added" || (beforeText().length === 0 && afterText().length > 0)
+                      diff.status === "added" || (beforeText().length === 0 && afterText().length > 0)
                     const isDeleted = () =>
-                      item().status === "deleted" || (afterText().length === 0 && beforeText().length > 0)
+                      diff.status === "deleted" || (afterText().length === 0 && beforeText().length > 0)
 
                     const selectedLines = createMemo(() => {
                       const current = selection()
@@ -425,7 +426,7 @@ export const SessionReview = (props: SessionReviewProps) => {
                           file,
                           selection,
                           comment,
-                          preview: selectionPreview(item(), selection),
+                          preview: selectionPreview(diff, selection),
                         })
                       },
                       onUpdate: ({ id, comment, selection }) => {
@@ -434,7 +435,7 @@ export const SessionReview = (props: SessionReviewProps) => {
                           file,
                           selection,
                           comment,
-                          preview: selectionPreview(item(), selection),
+                          preview: selectionPreview(diff, selection),
                         })
                       },
                       onDelete: (comment) => {
@@ -513,7 +514,7 @@ export const SessionReview = (props: SessionReviewProps) => {
                                       <span data-slot="session-review-change" data-type="added">
                                         {i18n.t("ui.sessionReview.change.added")}
                                       </span>
-                                      <DiffChanges changes={item()} />
+                                      <DiffChanges changes={diff} />
                                     </div>
                                   </Match>
                                   <Match when={isDeleted()}>
@@ -527,7 +528,7 @@ export const SessionReview = (props: SessionReviewProps) => {
                                     </span>
                                   </Match>
                                   <Match when={true}>
-                                    <DiffChanges changes={item()} />
+                                    <DiffChanges changes={diff} />
                                   </Match>
                                 </Switch>
                                 <span data-slot="session-review-diff-chevron">
@@ -582,7 +583,8 @@ export const SessionReview = (props: SessionReviewProps) => {
                                   <Dynamic
                                     component={fileComponent}
                                     mode="diff"
-                                    preloadedDiff={item().preloaded}
+                                    fileDiff={diff.fileDiff}
+                                    preloadedDiff={diff.preloaded}
                                     diffStyle={diffStyle()}
                                     onRendered={() => {
                                       props.onDiffRendered?.()
@@ -597,20 +599,11 @@ export const SessionReview = (props: SessionReviewProps) => {
                                     renderHoverUtility={props.onLineComment ? commentsUi.renderHoverUtility : undefined}
                                     selectedLines={selectedLines()}
                                     commentedLines={commentedLines()}
-                                    before={{
-                                      name: file,
-                                      contents: typeof item().before === "string" ? item().before : "",
-                                    }}
-                                    after={{
-                                      name: file,
-                                      contents: typeof item().after === "string" ? item().after : "",
-                                    }}
                                     media={{
                                       mode: "auto",
                                       path: file,
-                                      before: item().before,
-                                      after: item().after,
-                                      readFile: props.readFile,
+                                      deleted: diff.status === "deleted",
+                                      readFile: diff.status === "deleted" ? undefined : props.readFile,
                                     }}
                                   />
                                 </Match>

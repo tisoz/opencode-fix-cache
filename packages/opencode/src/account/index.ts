@@ -1,9 +1,16 @@
 import { Cache, Clock, Duration, Effect, Layer, Option, Schema, SchemaGetter, ServiceMap } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientError,
+  HttpClientRequest,
+  HttpClientResponse,
+} from "effect/unstable/http"
 
 import { makeRuntime } from "@/effect/run-service"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { AccountRepo, type AccountRow } from "./repo"
+import { normalizeServerUrl } from "./url"
 import {
   type AccountError,
   AccessToken,
@@ -12,6 +19,7 @@ import {
   Info,
   RefreshToken,
   AccountServiceError,
+  AccountTransportError,
   Login,
   Org,
   OrgID,
@@ -30,6 +38,7 @@ export {
   type AccountError,
   AccountRepoError,
   AccountServiceError,
+  AccountTransportError,
   AccessToken,
   RefreshToken,
   DeviceCode,
@@ -50,6 +59,11 @@ export {
 export type AccountOrgs = {
   account: Info
   orgs: readonly Org[]
+}
+
+export type ActiveOrg = {
+  account: Info
+  org: Org
 }
 
 class RemoteConfig extends Schema.Class<RemoteConfig>("RemoteConfig")({
@@ -120,19 +134,39 @@ class TokenRefreshRequest extends Schema.Class<TokenRefreshRequest>("TokenRefres
 
 const clientId = "opencode-cli"
 const eagerRefreshThreshold = Duration.minutes(5)
+const eagerRefreshThresholdMs = Duration.toMillis(eagerRefreshThreshold)
+
+const isTokenFresh = (tokenExpiry: number | null, now: number) =>
+  tokenExpiry != null && tokenExpiry > now + eagerRefreshThresholdMs
 
 const mapAccountServiceError =
   (message = "Account service operation failed") =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, AccountServiceError, R> =>
-    effect.pipe(
-      Effect.mapError((cause) =>
-        cause instanceof AccountServiceError ? cause : new AccountServiceError({ message, cause }),
-      ),
-    )
+  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, AccountError, R> =>
+    effect.pipe(Effect.mapError((cause) => accountErrorFromCause(cause, message)))
+
+const accountErrorFromCause = (cause: unknown, message: string): AccountError => {
+  if (cause instanceof AccountServiceError || cause instanceof AccountTransportError) {
+    return cause
+  }
+
+  if (HttpClientError.isHttpClientError(cause)) {
+    switch (cause.reason._tag) {
+      case "TransportError": {
+        return AccountTransportError.fromHttpClientError(cause.reason)
+      }
+      default: {
+        return new AccountServiceError({ message, cause })
+      }
+    }
+  }
+
+  return new AccountServiceError({ message, cause })
+}
 
 export namespace Account {
   export interface Interface {
     readonly active: () => Effect.Effect<Option.Option<Info>, AccountError>
+    readonly activeOrg: () => Effect.Effect<Option.Option<ActiveOrg>, AccountError>
     readonly list: () => Effect.Effect<Info[], AccountError>
     readonly orgsByAccount: () => Effect.Effect<readonly AccountOrgs[], AccountError>
     readonly remove: (accountID: AccountID) => Effect.Effect<void, AccountError>
@@ -219,7 +253,7 @@ export namespace Account {
 
           const account = maybeAccount.value
           const now = yield* Clock.currentTimeMillis
-          if (account.token_expiry && account.token_expiry > now + Duration.toMillis(eagerRefreshThreshold)) {
+          if (isTokenFresh(account.token_expiry, now)) {
             return account.access_token
           }
 
@@ -229,7 +263,7 @@ export namespace Account {
 
       const resolveToken = Effect.fnUntraced(function* (row: AccountRow) {
         const now = yield* Clock.currentTimeMillis
-        if (row.token_expiry && row.token_expiry > now + Duration.toMillis(eagerRefreshThreshold)) {
+        if (isTokenFresh(row.token_expiry, now)) {
           return row.access_token
         }
 
@@ -275,19 +309,31 @@ export namespace Account {
         resolveAccess(accountID).pipe(Effect.map(Option.map((r) => r.accessToken))),
       )
 
+      const activeOrg = Effect.fn("Account.activeOrg")(function* () {
+        const activeAccount = yield* repo.active()
+        if (Option.isNone(activeAccount)) return Option.none<ActiveOrg>()
+
+        const account = activeAccount.value
+        if (!account.active_org_id) return Option.none<ActiveOrg>()
+
+        const accountOrgs = yield* orgs(account.id)
+        const org = accountOrgs.find((item) => item.id === account.active_org_id)
+        if (!org) return Option.none<ActiveOrg>()
+
+        return Option.some({ account, org })
+      })
+
       const orgsByAccount = Effect.fn("Account.orgsByAccount")(function* () {
         const accounts = yield* repo.list()
-        const [errors, results] = yield* Effect.partition(
+        return yield* Effect.forEach(
           accounts,
-          (account) => orgs(account.id).pipe(Effect.map((orgs) => ({ account, orgs }))),
+          (account) =>
+            orgs(account.id).pipe(
+              Effect.catch(() => Effect.succeed([] as readonly Org[])),
+              Effect.map((orgs) => ({ account, orgs })),
+            ),
           { concurrency: 3 },
         )
-        for (const error of errors) {
-          yield* Effect.logWarning("failed to fetch orgs for account").pipe(
-            Effect.annotateLogs({ error: String(error) }),
-          )
-        }
-        return results
       })
 
       const orgs = Effect.fn("Account.orgs")(function* (accountID: AccountID) {
@@ -324,8 +370,9 @@ export namespace Account {
       })
 
       const login = Effect.fn("Account.login")(function* (server: string) {
+        const normalizedServer = normalizeServerUrl(server)
         const response = yield* executeEffectOk(
-          HttpClientRequest.post(`${server}/auth/device/code`).pipe(
+          HttpClientRequest.post(`${normalizedServer}/auth/device/code`).pipe(
             HttpClientRequest.acceptJson,
             HttpClientRequest.schemaBodyJson(ClientId)(new ClientId({ client_id: clientId })),
           ),
@@ -337,8 +384,8 @@ export namespace Account {
         return new Login({
           code: parsed.device_code,
           user: parsed.user_code,
-          url: `${server}${parsed.verification_uri_complete}`,
-          server,
+          url: `${normalizedServer}${parsed.verification_uri_complete}`,
+          server: normalizedServer,
           expiry: parsed.expires_in,
           interval: parsed.interval,
         })
@@ -392,6 +439,7 @@ export namespace Account {
 
       return Service.of({
         active: repo.active,
+        activeOrg,
         list: repo.list,
         orgsByAccount,
         remove: repo.remove,
@@ -413,9 +461,24 @@ export namespace Account {
     return Option.getOrUndefined(await runPromise((service) => service.active()))
   }
 
-  export async function config(accountID: AccountID, orgID: OrgID): Promise<Record<string, unknown> | undefined> {
-    const cfg = await runPromise((service) => service.config(accountID, orgID))
-    return Option.getOrUndefined(cfg)
+  export async function list(): Promise<Info[]> {
+    return runPromise((service) => service.list())
+  }
+
+  export async function activeOrg(): Promise<ActiveOrg | undefined> {
+    return Option.getOrUndefined(await runPromise((service) => service.activeOrg()))
+  }
+
+  export async function orgsByAccount(): Promise<readonly AccountOrgs[]> {
+    return runPromise((service) => service.orgsByAccount())
+  }
+
+  export async function orgs(accountID: AccountID): Promise<readonly Org[]> {
+    return runPromise((service) => service.orgs(accountID))
+  }
+
+  export async function switchOrg(accountID: AccountID, orgID: OrgID) {
+    return runPromise((service) => service.use(accountID, Option.some(orgID)))
   }
 
   export async function token(accountID: AccountID): Promise<AccessToken | undefined> {
