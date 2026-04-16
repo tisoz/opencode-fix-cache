@@ -8,11 +8,11 @@ import { Global } from "@/global"
 import { iife } from "@/util/iife"
 import { createSimpleContext } from "./helper"
 import { useToast } from "../ui/toast"
-import { Provider } from "@/provider/provider"
+import { Provider } from "@/provider"
 import { useArgs } from "./args"
 import { useSDK } from "./sdk"
 import { RGBA } from "@opentui/core"
-import { Filesystem } from "@/util/filesystem"
+import { Filesystem } from "@/util"
 
 export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
   name: "Local",
@@ -131,7 +131,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           return
         }
         state.pending = false
-        Filesystem.writeJson(filePath, {
+        void Filesystem.writeJson(filePath, {
           recent: modelStore.recent,
           favorite: modelStore.favorite,
           variant: modelStore.variant,

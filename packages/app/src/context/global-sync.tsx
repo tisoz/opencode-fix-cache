@@ -8,7 +8,7 @@ import type {
   Todo,
 } from "@opencode-ai/sdk/v2/client"
 import { showToast } from "@opencode-ai/ui/toast"
-import { getFilename } from "@opencode-ai/util/path"
+import { getFilename } from "@opencode-ai/shared/util/path"
 import { createContext, getOwner, onCleanup, onMount, type ParentProps, untrack, useContext } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useLanguage } from "@/context/language"
@@ -237,7 +237,7 @@ function createGlobalSync() {
       })
 
     sessionLoads.set(directory, promise)
-    promise.finally(() => {
+    void promise.finally(() => {
       sessionLoads.delete(directory)
       children.unpin(directory)
     })
@@ -273,7 +273,7 @@ function createGlobalSync() {
     })()
 
     booting.set(directory, promise)
-    promise.finally(() => {
+    void promise.finally(() => {
       booting.delete(directory)
       children.unpin(directory)
     })
@@ -317,7 +317,7 @@ function createGlobalSync() {
       setSessionTodo,
       vcsCache: children.vcsCache.get(directory),
       loadLsp: () => {
-        sdkFor(directory)
+        void sdkFor(directory)
           .lsp.status()
           .then((x) => {
             setStore("lsp", x.data ?? [])
@@ -359,13 +359,13 @@ function createGlobalSync() {
         eventFrame = undefined
         eventTimer = setTimeout(() => {
           eventTimer = undefined
-          globalSDK.event.start()
+          void globalSDK.event.start()
         }, 0)
       })
     } else {
       eventTimer = setTimeout(() => {
         eventTimer = undefined
-        globalSDK.event.start()
+        void globalSDK.event.start()
       }, 0)
     }
     void bootstrap()

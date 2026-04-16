@@ -22,13 +22,13 @@ import { createStore, produce, reconcile } from "solid-js/store"
 import { useProject } from "@tui/context/project"
 import { useEvent } from "@tui/context/event"
 import { useSDK } from "@tui/context/sdk"
-import { Binary } from "@opencode-ai/util/binary"
+import { Binary } from "@opencode-ai/shared/util/binary"
 import { createSimpleContext } from "./helper"
 import type { Snapshot } from "@/snapshot"
 import { useExit } from "./exit"
 import { useArgs } from "./args"
 import { batch, createEffect, on } from "solid-js"
-import { Log } from "@/util/log"
+import { Log } from "@/util"
 import { ConsoleState, emptyConsoleState, type ConsoleState as ConsoleStateType } from "@/config/console-state"
 
 export const { use: useSync, provider: SyncProvider } = createSimpleContext({
@@ -111,7 +111,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     event.subscribe((event) => {
       switch (event.type) {
         case "server.instance.disposed":
-          bootstrap()
+          void bootstrap()
           break
         case "permission.replied": {
           const requests = store.permission[event.properties.sessionID]
@@ -336,7 +336,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
 
         case "lsp.updated": {
           const workspace = project.workspace.current()
-          sdk.client.lsp.status({ workspace }).then((x) => setStore("lsp", x.data!))
+          void sdk.client.lsp.status({ workspace }).then((x) => setStore("lsp", x.data ?? []))
           break
         }
 
@@ -415,18 +415,18 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         .then(() => {
           if (store.status !== "complete") setStore("status", "partial")
           // non-blocking
-          Promise.all([
+          void Promise.all([
             ...(args.continue ? [] : [sessionListPromise.then((sessions) => setStore("session", reconcile(sessions)))]),
             consoleStatePromise.then((consoleState) => setStore("console_state", reconcile(consoleState))),
             sdk.client.command.list({ workspace }).then((x) => setStore("command", reconcile(x.data ?? []))),
-            sdk.client.lsp.status({ workspace }).then((x) => setStore("lsp", reconcile(x.data!))),
-            sdk.client.mcp.status({ workspace }).then((x) => setStore("mcp", reconcile(x.data!))),
+            sdk.client.lsp.status({ workspace }).then((x) => setStore("lsp", reconcile(x.data ?? []))),
+            sdk.client.mcp.status({ workspace }).then((x) => setStore("mcp", reconcile(x.data ?? {}))),
             sdk.client.experimental.resource
               .list({ workspace })
               .then((x) => setStore("mcp_resource", reconcile(x.data ?? {}))),
-            sdk.client.formatter.status({ workspace }).then((x) => setStore("formatter", reconcile(x.data!))),
+            sdk.client.formatter.status({ workspace }).then((x) => setStore("formatter", reconcile(x.data ?? []))),
             sdk.client.session.status({ workspace }).then((x) => {
-              setStore("session_status", reconcile(x.data!))
+              setStore("session_status", reconcile(x.data ?? {}))
             }),
             sdk.client.provider.auth({ workspace }).then((x) => setStore("provider_auth", reconcile(x.data ?? {}))),
             sdk.client.vcs.get({ workspace }).then((x) => setStore("vcs", reconcile(x.data))),

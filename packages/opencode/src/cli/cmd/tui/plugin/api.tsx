@@ -8,7 +8,7 @@ import type { useSDK } from "@tui/context/sdk"
 import type { useSync } from "@tui/context/sync"
 import type { useTheme } from "@tui/context/theme"
 import { Dialog as DialogUI, type useDialog } from "@tui/ui/dialog"
-import type { TuiConfig } from "@/config/tui"
+import type { TuiConfig } from "@/config"
 import { createPluginKeybind } from "../context/plugin-keybinds"
 import type { useKV } from "../context/kv"
 import { DialogAlert } from "../ui/dialog-alert"
@@ -19,7 +19,6 @@ import { Prompt } from "../component/prompt"
 import { Slot as HostSlot } from "./slots"
 import type { useToast } from "../ui/toast"
 import { Installation } from "@/installation"
-import { type OpencodeClient } from "@opencode-ai/sdk/v2"
 
 type RouteEntry = {
   key: symbol

@@ -1,6 +1,6 @@
 import { TextAttributes } from "@opentui/core"
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { Clipboard } from "@tui/util/clipboard"
+import * as Clipboard from "@tui/util/clipboard"
 import { createSignal } from "solid-js"
 import { Installation } from "@/installation"
 import { win32FlushInputBuffer } from "../win32"
@@ -26,7 +26,7 @@ export function ErrorComponent(props: {
 
   useKeyboard((evt) => {
     if (evt.ctrl && evt.name === "c") {
-      handleExit()
+      void handleExit()
     }
   })
   const [copied, setCopied] = createSignal(false)
@@ -56,7 +56,7 @@ export function ErrorComponent(props: {
   issueURL.searchParams.set("opencode-version", Installation.VERSION)
 
   const copyIssueURL = () => {
-    Clipboard.copy(issueURL.toString()).then(() => {
+    void Clipboard.copy(issueURL.toString()).then(() => {
       setCopied(true)
     })
   }
