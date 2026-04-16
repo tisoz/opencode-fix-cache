@@ -1429,44 +1429,43 @@ const layer: Layer.Layer<
           const combined = signals.length === 0 ? null : signals.length === 1 ? signals[0] : AbortSignal.any(signals)
           if (combined) opts.signal = combined
 
+          // Inject metadata from provider.options if enableMeta is set
+          if (provider.options?.enableMeta && opts.body && opts.method === "POST") {
+            try {
+              options.headers["x-opencode-session"] = model.options.metadata.user_session_id
 
-            // Inject metadata from provider.options if enableMeta is set
-            if (provider.options?.enableMeta && opts.body && opts.method === "POST") {
-              try {
-                options.headers["x-opencode-session"] = model.options.metadata.user_session_id
-
-                const body = JSON.parse(opts.body as string)
-                body.metadata ||= {}
-                body.metadata.user_id = model.options.metadata.user_session_id
-                body.metadata.project_id = model.options.metadata.project_id
-                body.metadata.session_id = model.options.metadata.session_id
-                opts.body = JSON.stringify(body)
-              } catch {}
-            }
-
-            // Set service_tier to priority if enableFast is set
-            if (provider.options?.enableFast && opts.body && opts.method === "POST") {
-              try {
-                const body = JSON.parse(opts.body as string)
-                body.service_tier = "priority"
-                opts.body = JSON.stringify(body)
-              } catch {}
-            }
-
-            // Strip openai itemId metadata following what codex does
-            if (model.api.npm === "@ai-sdk/openai" && opts.body && opts.method === "POST") {
               const body = JSON.parse(opts.body as string)
-              const isAzure = model.providerID.includes("azure")
-              const keepIds = isAzure && body.store === true
-              if (!keepIds && Array.isArray(body.input)) {
-                for (const item of body.input) {
-                  if ("id" in item) {
-                    delete item.id
-                  }
+              body.metadata ||= {}
+              body.metadata.user_id = model.options.metadata.user_session_id
+              body.metadata.project_id = model.options.metadata.project_id
+              body.metadata.session_id = model.options.metadata.session_id
+              opts.body = JSON.stringify(body)
+            } catch {}
+          }
+
+          // Set service_tier to priority if enableFast is set
+          if (provider.options?.enableFast && opts.body && opts.method === "POST") {
+            try {
+              const body = JSON.parse(opts.body as string)
+              body.service_tier = "priority"
+              opts.body = JSON.stringify(body)
+            } catch {}
+          }
+
+          // Strip openai itemId metadata following what codex does
+          if (model.api.npm === "@ai-sdk/openai" && opts.body && opts.method === "POST") {
+            const body = JSON.parse(opts.body as string)
+            const isAzure = model.providerID.includes("azure")
+            const keepIds = isAzure && body.store === true
+            if (!keepIds && Array.isArray(body.input)) {
+              for (const item of body.input) {
+                if ("id" in item) {
+                  delete item.id
                 }
-                opts.body = JSON.stringify(body)
               }
+              opts.body = JSON.stringify(body)
             }
+          }
 
           const res = await fetchFn(input, {
             ...opts,
