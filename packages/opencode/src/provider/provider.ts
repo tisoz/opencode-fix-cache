@@ -13,50 +13,20 @@ import { type LanguageModelV3 } from "@ai-sdk/provider"
 import * as ModelsDev from "./models"
 import { Auth } from "../auth"
 import { Env } from "../env"
-import { Instance } from "../project/instance"
+import { InstallationVersion } from "../installation/version"
 import { Flag } from "../flag/flag"
+import { zod } from "@/util/effect-zod"
 import { iife } from "@/util/iife"
 import { Global } from "../global"
 import path from "path"
-import { Effect, Layer, Context } from "effect"
+import { Effect, Layer, Context, Schema, Types } from "effect"
 import { EffectBridge } from "@/effect"
 import { InstanceState } from "@/effect"
 import { AppFileSystem } from "@opencode-ai/shared/filesystem"
 import { isRecord } from "@/util/record"
+import { withStatics } from "@/util/schema"
 
-// Direct imports for bundled providers
-import { createAmazonBedrock, type AmazonBedrockProviderSettings } from "@ai-sdk/amazon-bedrock"
-import { createAnthropic } from "@ai-sdk/anthropic"
-import { createAzure } from "@ai-sdk/azure"
-import { createGoogleGenerativeAI } from "@ai-sdk/google"
-import { createVertex } from "@ai-sdk/google-vertex"
-import { createVertexAnthropic } from "@ai-sdk/google-vertex/anthropic"
-import { createOpenAI } from "@ai-sdk/openai"
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
-import { createOpenRouter } from "@openrouter/ai-sdk-provider"
-import { createOpenaiCompatible as createGitHubCopilotOpenAICompatible } from "./sdk/copilot"
-import { createXai } from "@ai-sdk/xai"
-import { createMistral } from "@ai-sdk/mistral"
-import { createGroq } from "@ai-sdk/groq"
-import { createDeepInfra } from "@ai-sdk/deepinfra"
-import { createCerebras } from "@ai-sdk/cerebras"
-import { createCohere } from "@ai-sdk/cohere"
-import { createGateway } from "@ai-sdk/gateway"
-import { createTogetherAI } from "@ai-sdk/togetherai"
-import { createPerplexity } from "@ai-sdk/perplexity"
-import { createVercel } from "@ai-sdk/vercel"
-import { createVenice } from "venice-ai-sdk-provider"
-import { createAlibaba } from "@ai-sdk/alibaba"
-import {
-  createGitLab,
-  VERSION as GITLAB_PROVIDER_VERSION,
-  isWorkflowModel,
-  discoverWorkflowModels,
-} from "gitlab-ai-provider"
-import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
-import { GoogleAuth } from "google-auth-library"
 import * as ProviderTransform from "./transform"
-import { Installation } from "../installation"
 import { ModelID, ProviderID } from "./schema"
 
 const log = Log.create({ service: "provider" })
@@ -119,30 +89,31 @@ type BundledSDK = {
   languageModel(modelId: string): LanguageModelV3
 }
 
-const BUNDLED_PROVIDERS: Record<string, (options: any) => BundledSDK> = {
-  "@ai-sdk/amazon-bedrock": createAmazonBedrock,
-  "@ai-sdk/anthropic": createAnthropic,
-  "@ai-sdk/azure": createAzure,
-  "@ai-sdk/google": createGoogleGenerativeAI,
-  "@ai-sdk/google-vertex": createVertex,
-  "@ai-sdk/google-vertex/anthropic": createVertexAnthropic,
-  "@ai-sdk/openai": createOpenAI,
-  "@ai-sdk/openai-compatible": createOpenAICompatible,
-  "@openrouter/ai-sdk-provider": createOpenRouter,
-  "@ai-sdk/xai": createXai,
-  "@ai-sdk/mistral": createMistral,
-  "@ai-sdk/groq": createGroq,
-  "@ai-sdk/deepinfra": createDeepInfra,
-  "@ai-sdk/cerebras": createCerebras,
-  "@ai-sdk/cohere": createCohere,
-  "@ai-sdk/gateway": createGateway,
-  "@ai-sdk/togetherai": createTogetherAI,
-  "@ai-sdk/perplexity": createPerplexity,
-  "@ai-sdk/vercel": createVercel,
-  "@ai-sdk/alibaba": createAlibaba,
-  "gitlab-ai-provider": createGitLab,
-  "@ai-sdk/github-copilot": createGitHubCopilotOpenAICompatible,
-  "venice-ai-sdk-provider": createVenice,
+const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>> = {
+  "@ai-sdk/amazon-bedrock": () => import("@ai-sdk/amazon-bedrock").then((m) => m.createAmazonBedrock),
+  "@ai-sdk/anthropic": () => import("@ai-sdk/anthropic").then((m) => m.createAnthropic),
+  "@ai-sdk/azure": () => import("@ai-sdk/azure").then((m) => m.createAzure),
+  "@ai-sdk/google": () => import("@ai-sdk/google").then((m) => m.createGoogleGenerativeAI),
+  "@ai-sdk/google-vertex": () => import("@ai-sdk/google-vertex").then((m) => m.createVertex),
+  "@ai-sdk/google-vertex/anthropic": () =>
+    import("@ai-sdk/google-vertex/anthropic").then((m) => m.createVertexAnthropic),
+  "@ai-sdk/openai": () => import("@ai-sdk/openai").then((m) => m.createOpenAI),
+  "@ai-sdk/openai-compatible": () => import("@ai-sdk/openai-compatible").then((m) => m.createOpenAICompatible),
+  "@openrouter/ai-sdk-provider": () => import("@openrouter/ai-sdk-provider").then((m) => m.createOpenRouter),
+  "@ai-sdk/xai": () => import("@ai-sdk/xai").then((m) => m.createXai),
+  "@ai-sdk/mistral": () => import("@ai-sdk/mistral").then((m) => m.createMistral),
+  "@ai-sdk/groq": () => import("@ai-sdk/groq").then((m) => m.createGroq),
+  "@ai-sdk/deepinfra": () => import("@ai-sdk/deepinfra").then((m) => m.createDeepInfra),
+  "@ai-sdk/cerebras": () => import("@ai-sdk/cerebras").then((m) => m.createCerebras),
+  "@ai-sdk/cohere": () => import("@ai-sdk/cohere").then((m) => m.createCohere),
+  "@ai-sdk/gateway": () => import("@ai-sdk/gateway").then((m) => m.createGateway),
+  "@ai-sdk/togetherai": () => import("@ai-sdk/togetherai").then((m) => m.createTogetherAI),
+  "@ai-sdk/perplexity": () => import("@ai-sdk/perplexity").then((m) => m.createPerplexity),
+  "@ai-sdk/vercel": () => import("@ai-sdk/vercel").then((m) => m.createVercel),
+  "@ai-sdk/alibaba": () => import("@ai-sdk/alibaba").then((m) => m.createAlibaba),
+  "gitlab-ai-provider": () => import("gitlab-ai-provider").then((m) => m.createGitLab),
+  "@ai-sdk/github-copilot": () => import("./sdk/copilot").then((m) => m.createOpenaiCompatible),
+  "venice-ai-sdk-provider": () => import("venice-ai-sdk-provider").then((m) => m.createVenice),
 }
 
 type CustomModelLoader = (sdk: any, modelID: string, options?: Record<string, any>) => Promise<any>
@@ -307,7 +278,9 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
       if (!profile && !awsAccessKeyId && !awsBearerToken && !awsWebIdentityTokenFile && !containerCreds)
         return { autoload: false }
 
-      const providerOptions: AmazonBedrockProviderSettings = {
+      const { fromNodeProviderChain } = yield* Effect.promise(() => import("@aws-sdk/credential-providers"))
+
+      const providerOptions: Record<string, any> = {
         region: defaultRegion,
       }
 
@@ -416,7 +389,28 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         },
       }
     }),
+    llmgateway: () =>
+      Effect.succeed({
+        autoload: false,
+        options: {
+          headers: {
+            "HTTP-Referer": "https://opencode.ai/",
+            "X-Title": "opencode",
+            "X-Source": "opencode",
+          },
+        },
+      }),
     openrouter: () =>
+      Effect.succeed({
+        autoload: false,
+        options: {
+          headers: {
+            "HTTP-Referer": "https://opencode.ai/",
+            "X-Title": "opencode",
+          },
+        },
+      }),
+    nvidia: () =>
       Effect.succeed({
         autoload: false,
         options: {
@@ -465,6 +459,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           project,
           location,
           fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+            const { GoogleAuth } = await import("google-auth-library")
             const auth = new GoogleAuth()
             const client = await auth.getApplicationDefault()
             const token = await client.credential.getAccessToken()
@@ -534,6 +529,12 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         },
       }),
     gitlab: Effect.fnUntraced(function* (input: Info) {
+      const {
+        VERSION: GITLAB_PROVIDER_VERSION,
+        isWorkflowModel,
+        discoverWorkflowModels,
+      } = yield* Effect.promise(() => import("gitlab-ai-provider"))
+
       const instanceUrl = (yield* dep.get("GITLAB_INSTANCE_URL")) || "https://gitlab.com"
 
       const auth = yield* dep.auth(input.id)
@@ -545,9 +546,10 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
       const token = apiKey ?? (yield* dep.get("GITLAB_TOKEN"))
 
       const providerConfig = (yield* dep.config()).provider?.["gitlab"]
+      const directory = yield* InstanceState.directory
 
       const aiGatewayHeaders = {
-        "User-Agent": `opencode/${Installation.VERSION} gitlab-ai-provider/${GITLAB_PROVIDER_VERSION} (${os.platform()} ${os.release()}; ${os.arch()})`,
+        "User-Agent": `opencode/${InstallationVersion} gitlab-ai-provider/${GITLAB_PROVIDER_VERSION} (${os.platform()} ${os.release()}; ${os.arch()})`,
         "anthropic-beta": "context-1m-2025-08-07",
         ...providerConfig?.options?.aiGatewayHeaders,
       }
@@ -566,14 +568,16 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           aiGatewayHeaders,
           featureFlags,
         },
-        async getModel(sdk: ReturnType<typeof createGitLab>, modelID: string, options?: Record<string, any>) {
+        async getModel(sdk: any, modelID: string, options?: Record<string, any>) {
           if (modelID.startsWith("duo-workflow-")) {
-            const workflowRef = options?.workflowRef as string | undefined
+            const workflowRef = typeof options?.workflowRef === "string" ? options.workflowRef : undefined
             // Use the static mapping if it exists, otherwise use duo-workflow with selectedModelRef
             const sdkModelID = isWorkflowModel(modelID) ? modelID : "duo-workflow"
+            const workflowDefinition =
+              typeof options?.workflowDefinition === "string" ? options.workflowDefinition : undefined
             const model = sdk.workflowChat(sdkModelID, {
               featureFlags,
-              workflowDefinition: options?.workflowDefinition as string | undefined,
+              workflowDefinition,
             })
             if (workflowRef) {
               model.selectedModelRef = workflowRef
@@ -597,10 +601,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
               auth?.type === "api" ? { "PRIVATE-TOKEN": token } : { Authorization: `Bearer ${token}` }
 
             log.info("gitlab model discovery starting", { instanceUrl })
-            const result = await discoverWorkflowModels(
-              { instanceUrl, getHeaders },
-              { workingDirectory: Instance.directory },
-            )
+            const result = await discoverWorkflowModels({ instanceUrl, getHeaders }, { workingDirectory: directory })
 
             if (!result.models.length) {
               log.info("gitlab model discovery skipped: no models found", {
@@ -701,7 +702,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         options: {
           apiKey,
           headers: {
-            "User-Agent": `opencode/${Installation.VERSION} cloudflare-workers-ai (${os.platform()} ${os.release()}; ${os.arch()})`,
+            "User-Agent": `opencode/${InstallationVersion} cloudflare-workers-ai (${os.platform()} ${os.release()}; ${os.arch()})`,
           },
         },
         async getModel(sdk: any, modelID: string) {
@@ -772,7 +773,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         skipCache: input.options?.skipCache,
         collectLog: input.options?.collectLog,
         headers: {
-          "User-Agent": `opencode/${Installation.VERSION} cloudflare-ai-gateway (${os.platform()} ${os.release()}; ${os.arch()})`,
+          "User-Agent": `opencode/${InstallationVersion} cloudflare-ai-gateway (${os.platform()} ${os.release()}; ${os.arch()})`,
         },
       }
 
@@ -815,91 +816,111 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
   }
 }
 
-export const Model = z
-  .object({
-    id: ModelID.zod,
-    providerID: ProviderID.zod,
-    api: z.object({
-      id: z.string(),
-      url: z.string(),
-      npm: z.string(),
-    }),
-    name: z.string(),
-    family: z.string().optional(),
-    capabilities: z.object({
-      temperature: z.boolean(),
-      reasoning: z.boolean(),
-      attachment: z.boolean(),
-      toolcall: z.boolean(),
-      input: z.object({
-        text: z.boolean(),
-        audio: z.boolean(),
-        image: z.boolean(),
-        video: z.boolean(),
-        pdf: z.boolean(),
-      }),
-      output: z.object({
-        text: z.boolean(),
-        audio: z.boolean(),
-        image: z.boolean(),
-        video: z.boolean(),
-        pdf: z.boolean(),
-      }),
-      interleaved: z.union([
-        z.boolean(),
-        z.object({
-          field: z.enum(["reasoning_content", "reasoning_details"]),
-        }),
-      ]),
-    }),
-    cost: z.object({
-      input: z.number(),
-      output: z.number(),
-      cache: z.object({
-        read: z.number(),
-        write: z.number(),
-      }),
-      experimentalOver200K: z
-        .object({
-          input: z.number(),
-          output: z.number(),
-          cache: z.object({
-            read: z.number(),
-            write: z.number(),
-          }),
-        })
-        .optional(),
-    }),
-    limit: z.object({
-      context: z.number(),
-      input: z.number().optional(),
-      output: z.number(),
-    }),
-    status: z.enum(["alpha", "beta", "deprecated", "active"]),
-    options: z.record(z.string(), z.any()),
-    headers: z.record(z.string(), z.string()),
-    release_date: z.string(),
-    variants: z.record(z.string(), z.record(z.string(), z.any())).optional(),
-  })
-  .meta({
-    ref: "Model",
-  })
-export type Model = z.infer<typeof Model>
+const ProviderApiInfo = Schema.Struct({
+  id: Schema.String,
+  url: Schema.String,
+  npm: Schema.String,
+})
 
-export const Info = z
-  .object({
-    id: ProviderID.zod,
-    name: z.string(),
-    source: z.enum(["env", "config", "custom", "api"]),
-    env: z.string().array(),
-    key: z.string().optional(),
-    options: z.record(z.string(), z.any()),
-    models: z.record(z.string(), Model),
-  })
-  .meta({
-    ref: "Provider",
-  })
-export type Info = z.infer<typeof Info>
+const ProviderModalities = Schema.Struct({
+  text: Schema.Boolean,
+  audio: Schema.Boolean,
+  image: Schema.Boolean,
+  video: Schema.Boolean,
+  pdf: Schema.Boolean,
+})
+
+const ProviderInterleaved = Schema.Union([
+  Schema.Boolean,
+  Schema.Struct({
+    field: Schema.Literals(["reasoning_content", "reasoning_details"]),
+  }),
+])
+
+const ProviderCapabilities = Schema.Struct({
+  temperature: Schema.Boolean,
+  reasoning: Schema.Boolean,
+  attachment: Schema.Boolean,
+  toolcall: Schema.Boolean,
+  input: ProviderModalities,
+  output: ProviderModalities,
+  interleaved: ProviderInterleaved,
+})
+
+const ProviderCacheCost = Schema.Struct({
+  read: Schema.Number,
+  write: Schema.Number,
+})
+
+const ProviderCost = Schema.Struct({
+  input: Schema.Number,
+  output: Schema.Number,
+  cache: ProviderCacheCost,
+  experimentalOver200K: Schema.optional(
+    Schema.Struct({
+      input: Schema.Number,
+      output: Schema.Number,
+      cache: ProviderCacheCost,
+    }),
+  ),
+})
+
+const ProviderLimit = Schema.Struct({
+  context: Schema.Number,
+  input: Schema.optional(Schema.Number),
+  output: Schema.Number,
+})
+
+export const Model = Schema.Struct({
+  id: ModelID,
+  providerID: ProviderID,
+  api: ProviderApiInfo,
+  name: Schema.String,
+  family: Schema.optional(Schema.String),
+  capabilities: ProviderCapabilities,
+  cost: ProviderCost,
+  limit: ProviderLimit,
+  status: Schema.Literals(["alpha", "beta", "deprecated", "active"]),
+  options: Schema.Record(Schema.String, Schema.Any),
+  headers: Schema.Record(Schema.String, Schema.String),
+  release_date: Schema.String,
+  variants: Schema.optional(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Any))),
+})
+  .annotate({ identifier: "Model" })
+  .pipe(withStatics((s) => ({ zod: zod(s) })))
+export type Model = Types.DeepMutable<Schema.Schema.Type<typeof Model>>
+
+export const Info = Schema.Struct({
+  id: ProviderID,
+  name: Schema.String,
+  source: Schema.Literals(["env", "config", "custom", "api"]),
+  env: Schema.Array(Schema.String),
+  key: Schema.optional(Schema.String),
+  options: Schema.Record(Schema.String, Schema.Any),
+  models: Schema.Record(Schema.String, Model),
+})
+  .annotate({ identifier: "Provider" })
+  .pipe(withStatics((s) => ({ zod: zod(s) })))
+export type Info = Types.DeepMutable<Schema.Schema.Type<typeof Info>>
+
+const DefaultModelIDs = Schema.Record(Schema.String, Schema.String)
+
+export const ListResult = Schema.Struct({
+  all: Schema.Array(Info),
+  default: DefaultModelIDs,
+  connected: Schema.Array(Schema.String),
+}).pipe(withStatics((s) => ({ zod: zod(s) })))
+export type ListResult = Types.DeepMutable<Schema.Schema.Type<typeof ListResult>>
+
+export const ConfigProvidersResult = Schema.Struct({
+  providers: Schema.Array(Info),
+  default: DefaultModelIDs,
+}).pipe(withStatics((s) => ({ zod: zod(s) })))
+export type ConfigProvidersResult = Types.DeepMutable<Schema.Schema.Type<typeof ConfigProvidersResult>>
+
+export function defaultModelIDs<T extends { models: Record<string, { id: string }> }>(providers: Record<string, T>) {
+  return mapValues(providers, (item) => sort(Object.values(item.models))[0].id)
+}
 
 export interface Interface {
   readonly list: () => Effect.Effect<Record<ProviderID, Info>>
@@ -947,14 +968,14 @@ function cost(c: ModelsDev.Model["cost"]): Model["cost"] {
 }
 
 function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model): Model {
-  const m: Model = {
+  const base: Model = {
     id: ModelID.make(model.id),
     providerID: ProviderID.make(provider.id),
     name: model.name,
     family: model.family,
     api: {
       id: model.id,
-      url: model.provider?.api ?? provider.api!,
+      url: model.provider?.api ?? provider.api ?? "",
       npm: model.provider?.npm ?? provider.npm ?? "@ai-sdk/openai-compatible",
     },
     status: model.status ?? "active",
@@ -967,10 +988,10 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
       output: model.limit.output,
     },
     capabilities: {
-      temperature: model.temperature,
-      reasoning: model.reasoning,
-      attachment: model.attachment,
-      toolcall: model.tool_call,
+      temperature: model.temperature ?? false,
+      reasoning: model.reasoning ?? false,
+      attachment: model.attachment ?? false,
+      toolcall: model.tool_call ?? true,
       input: {
         text: model.modalities?.input?.includes("text") ?? false,
         audio: model.modalities?.input?.includes("audio") ?? false,
@@ -987,13 +1008,14 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
       },
       interleaved: model.interleaved ?? false,
     },
-    release_date: model.release_date,
+    release_date: model.release_date ?? "",
     variants: {},
   }
 
-  m.variants = mapValues(ProviderTransform.variants(m), (v) => v)
-
-  return m
+  return {
+    ...base,
+    variants: mapValues(ProviderTransform.variants(base), (v) => v),
+  }
 }
 
 export function fromModelsDevProvider(provider: ModelsDev.Provider): Info {
@@ -1002,17 +1024,22 @@ export function fromModelsDevProvider(provider: ModelsDev.Provider): Info {
     models[key] = fromModelsDevModel(provider, model)
     for (const [mode, opts] of Object.entries(model.experimental?.modes ?? {})) {
       const id = `${model.id}-${mode}`
-      const m = fromModelsDevModel(provider, model)
-      m.id = ModelID.make(id)
-      m.name = `${model.name} ${mode[0].toUpperCase()}${mode.slice(1)}`
-      if (opts.cost) m.cost = mergeDeep(m.cost, cost(opts.cost))
-      // convert body params to camelCase for ai sdk compatibility
-      if (opts.provider?.body)
-        m.options = Object.fromEntries(
-          Object.entries(opts.provider.body).map(([k, v]) => [k.replace(/_([a-z])/g, (_, c) => c.toUpperCase()), v]),
-        )
-      if (opts.provider?.headers) m.headers = opts.provider.headers
-      models[id] = m
+      const base = fromModelsDevModel(provider, model)
+      models[id] = {
+        ...base,
+        id: ModelID.make(id),
+        name: `${model.name} ${mode[0].toUpperCase()}${mode.slice(1)}`,
+        cost: opts.cost ? mergeDeep(base.cost, cost(opts.cost)) : base.cost,
+        options: opts.provider?.body
+          ? Object.fromEntries(
+              Object.entries(opts.provider.body).map(([k, v]) => [
+                k.replace(/_([a-z])/g, (_, c) => c.toUpperCase()),
+                v,
+              ]),
+            )
+          : base.options,
+        headers: opts.provider?.headers ?? base.headers,
+      }
     }
   }
   return {
@@ -1123,7 +1150,7 @@ const layer: Layer.Layer<
                   existingModel?.api.npm ??
                   modelsDev[providerID]?.npm ??
                   "@ai-sdk/openai-compatible",
-                url: model.provider?.api ?? provider?.api ?? existingModel?.api.url ?? modelsDev[providerID]?.api,
+                url: model.provider?.api ?? provider?.api ?? existingModel?.api.url ?? modelsDev[providerID]?.api ?? "",
               },
               status: model.status ?? existingModel?.status ?? "active",
               name,
@@ -1477,13 +1504,14 @@ const layer: Layer.Layer<
           return wrapSSE(res, chunkTimeout, chunkAbortCtl)
         }
 
-        const bundledFn = BUNDLED_PROVIDERS[model.api.npm]
-        if (bundledFn) {
+        const bundledLoader = BUNDLED_PROVIDERS[model.api.npm]
+        if (bundledLoader) {
           log.info("using bundled provider", {
             providerID: model.providerID,
             pkg: model.api.npm,
           })
-          const loaded = bundledFn({
+          const factory = await bundledLoader()
+          const loaded = factory({
             name: model.providerID,
             ...options,
           })
